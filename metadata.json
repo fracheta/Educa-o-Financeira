@@ -1,0 +1,6 @@
+{
+  "name": "Controle Financeiro",
+  "description": "Sistema completo de controle financeiro pessoal com gestão de receitas, despesas, saldos por origem, relatórios gráficos e persistência em banco de dados.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

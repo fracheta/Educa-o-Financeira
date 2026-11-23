@@ -1,0 +1,212 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Authenticated user profile stored privately under users/{userId}.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "User display name",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "User email address",
+          "minLength": 3,
+          "maxLength": 200
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of creation"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update"
+        }
+      },
+      "required": ["uid", "displayName", "email", "createdAt", "updatedAt"]
+    },
+    "Origin": {
+      "title": "Origin",
+      "description": "Bank account or cash origin where money enters or leaves.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Owner Firebase Auth UID",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "description": "Name of the bank or origin",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "isDefault": {
+          "type": "boolean",
+          "description": "Whether this is a default origin"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of creation"
+        }
+      },
+      "required": ["userId", "name", "isDefault", "createdAt"]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "Financial category for classifying incomes and expenses.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Owner Firebase Auth UID",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "description": "Category name",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "type": {
+          "type": "string",
+          "description": "Applicable transaction type",
+          "enum": ["receita", "despesa", "ambos"]
+        },
+        "color": {
+          "type": "string",
+          "description": "Hex color for chart representation",
+          "minLength": 4,
+          "maxLength": 9,
+          "pattern": "^#[0-9a-fA-F]{6}$"
+        },
+        "isDefault": {
+          "type": "boolean",
+          "description": "Whether this is a default category"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of creation"
+        }
+      },
+      "required": ["userId", "name", "type", "color", "isDefault", "createdAt"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Income or expense financial movement.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Owner Firebase Auth UID",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "type": {
+          "type": "string",
+          "description": "Movement type",
+          "enum": ["receita", "despesa"]
+        },
+        "description": {
+          "type": "string",
+          "description": "Transaction description",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "amount": {
+          "type": "number",
+          "description": "Positive monetary amount in BRL"
+        },
+        "date": {
+          "type": "string",
+          "description": "ISO date YYYY-MM-DD",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "category": {
+          "type": "string",
+          "description": "Category name",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "origin": {
+          "type": "string",
+          "description": "Bank or origin name",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "status": {
+          "type": "string",
+          "description": "Payment status",
+          "enum": ["Aberta", "Aguardar", "Paga"]
+        },
+        "notes": {
+          "type": "string",
+          "description": "Optional notes",
+          "maxLength": 500
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of creation"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update"
+        }
+      },
+      "required": [
+        "userId",
+        "type",
+        "description",
+        "amount",
+        "date",
+        "category",
+        "origin",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Private user profile document"
+    },
+    "/users/{userId}/origins/{originId}": {
+      "schema": { "$ref": "#/entities/Origin" },
+      "description": "User bank accounts and cash origins"
+    },
+    "/users/{userId}/categories/{categoryId}": {
+      "schema": { "$ref": "#/entities/Category" },
+      "description": "User financial categories"
+    },
+    "/users/{userId}/transactions/{transactionId}": {
+      "schema": { "$ref": "#/entities/Transaction" },
+      "description": "User income and expense transactions"
+    }
+  }
+}
