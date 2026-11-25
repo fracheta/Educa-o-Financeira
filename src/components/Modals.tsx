@@ -1,4 +1,4 @@
-import { AlertTriangle, X } from 'lucide-react';
+import { AlertTriangle, Lock, X } from 'lucide-react';
 import { FormEvent, useState } from 'react';
 import {
   Category,
@@ -13,6 +13,7 @@ import {
   getTodayISO,
   NormalizedTransactionPayload,
   validateTransactionInput,
+  verifyClearDataPassword,
 } from '../utils/finance';
 
 export function TransactionDetailModal({
@@ -534,3 +535,146 @@ export function DeleteConfirmModal({
     </div>
   );
 }
+
+export function ClearDataModal({
+  transactionCount,
+  clearing,
+  onCancel,
+  onConfirm,
+}: {
+  transactionCount: number;
+  clearing: boolean;
+  onCancel: () => void;
+  onConfirm: (resetCustomDefinitions: boolean) => Promise<void>;
+}) {
+  const [password, setPassword] = useState('');
+  const [resetCustomDefinitions, setResetCustomDefinitions] = useState(true);
+  const [error, setError] = useState('');
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (clearing) return;
+
+    if (!verifyClearDataPassword(password)) {
+      setError('Senha incorreta. Digite a senha correta para limpar os dados.');
+      return;
+    }
+
+    setError('');
+    try {
+      await onConfirm(resetCustomDefinitions);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Não foi possível limpar os dados do banco.'
+      );
+    }
+  };
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="clear-data-modal-title"
+      className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4"
+    >
+      <div className="bg-white rounded-xl border border-slate-200 shadow-lg max-w-md w-full p-6">
+        <div className="flex items-start justify-between gap-3 mb-4">
+          <div className="flex items-start gap-3">
+            <div className="p-2 bg-red-50 text-red-600 rounded-lg shrink-0">
+              <Lock className="w-5 h-5" aria-hidden="true" />
+            </div>
+            <div>
+              <h3
+                id="clear-data-modal-title"
+                className="text-base font-semibold text-slate-900"
+              >
+                Limpar dados do sistema
+              </h3>
+              <p className="text-sm text-slate-600 mt-1">
+                Esta ação apagará permanentemente{' '}
+                <strong className="text-slate-900">
+                  {transactionCount} movimentação(ões)
+                </strong>{' '}
+                armazenada(s) no banco de dados.
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={clearing}
+            aria-label="Fechar confirmação de limpeza"
+            className="p-1 text-slate-400 hover:text-slate-700 rounded cursor-pointer"
+          >
+            <X className="w-4 h-4" aria-hidden="true" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} noValidate className="space-y-4">
+          <label className="flex items-start gap-2.5 text-xs text-slate-700 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={resetCustomDefinitions}
+              onChange={(e) => setResetCustomDefinitions(e.target.checked)}
+              className="mt-0.5 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+            />
+            <span>
+              Também remover bancos e categorias personalizados (mantendo os
+              padrões iniciais)
+            </span>
+          </label>
+
+          <div>
+            <label
+              htmlFor="clear-data-password"
+              className="block text-sm font-medium text-slate-700 mb-1"
+            >
+              Senha de confirmação
+            </label>
+            <input
+              id="clear-data-password"
+              type="password"
+              inputMode="numeric"
+              autoComplete="off"
+              autoFocus
+              value={password}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                if (error) setError('');
+              }}
+              placeholder="Digite a senha"
+              className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-red-600"
+            />
+            {error && (
+              <p role="alert" className="text-xs text-red-600 mt-1.5">
+                {error}
+              </p>
+            )}
+          </div>
+
+          <div className="flex items-center justify-end gap-3 pt-1">
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={clearing}
+              className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 cursor-pointer"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={clearing}
+              className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-60 cursor-pointer"
+            >
+              {clearing ? 'Limpando...' : 'Confirmar limpeza'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+

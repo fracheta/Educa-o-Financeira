@@ -9,6 +9,7 @@ import {
   Search,
   Trash2,
 } from 'lucide-react';
+import { memo, useEffect, useState } from 'react';
 import {
   Category,
   ExpenseStatus,
@@ -46,7 +47,9 @@ const STATUS_TABS: Array<{ id: 'all' | ExpenseStatus; label: string }> = [
   { id: 'Paga', label: 'Pagas' },
 ];
 
-export function TransactionsSection({
+const PAGE_SIZE = 25;
+
+export const TransactionsSection = memo(function TransactionsSection({
   transactions,
   filteredTransactions,
   filters,
@@ -61,6 +64,23 @@ export function TransactionsSection({
   onOpenNewModal,
   compact = false,
 }: TransactionsSectionProps) {
+  const [visibleLimit, setVisibleLimit] = useState(PAGE_SIZE);
+
+  useEffect(() => {
+    setVisibleLimit(PAGE_SIZE);
+  }, [
+    filters.search,
+    filters.type,
+    filters.status,
+    filters.category,
+    filters.origin,
+    filters.dateStart,
+    filters.dateEnd,
+  ]);
+
+  const displayedTransactions = filteredTransactions.slice(0, visibleLimit);
+  const hasMore = filteredTransactions.length > visibleLimit;
+
   const hasActiveFilters =
     filters.search !== '' ||
     filters.type !== 'all' ||
@@ -387,7 +407,7 @@ export function TransactionsSection({
                 </td>
               </tr>
             ) : (
-              filteredTransactions.map((tx) => (
+              displayedTransactions.map((tx) => (
                 <tr
                   key={tx.id}
                   className="hover:bg-slate-50/80 transition-colors"
@@ -484,7 +504,7 @@ export function TransactionsSection({
               : 'Nenhuma movimentação corresponde aos filtros selecionados.'}
           </div>
         ) : (
-          filteredTransactions.map((tx) => (
+          displayedTransactions.map((tx) => (
             <div key={tx.id} className="p-4 space-y-2">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
@@ -550,6 +570,31 @@ export function TransactionsSection({
           ))
         )}
       </div>
+
+      {hasMore && (
+        <div className="p-4 border-t border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <span className="text-slate-500 tabular-nums">
+            Exibindo {displayedTransactions.length} de{' '}
+            {filteredTransactions.length} movimentações
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setVisibleLimit((prev) => prev + PAGE_SIZE)}
+              className="px-3 py-1.5 font-medium text-slate-700 bg-white border border-slate-200 rounded-md hover:bg-slate-100 transition-colors cursor-pointer"
+            >
+              Mostrar mais {Math.min(PAGE_SIZE, filteredTransactions.length - visibleLimit)}
+            </button>
+            <button
+              type="button"
+              onClick={() => setVisibleLimit(filteredTransactions.length)}
+              className="px-3 py-1.5 font-medium text-slate-900 bg-white border border-slate-200 rounded-md hover:bg-slate-100 transition-colors cursor-pointer"
+            >
+              Ver todas
+            </button>
+          </div>
+        </div>
+      )}
     </section>
   );
-}
+});

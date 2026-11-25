@@ -1,11 +1,19 @@
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { CheckCircle2, Cloud, Database, X } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { CheckCircle2, Cloud, Database, Trash2, X } from 'lucide-react';
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { CategoriesOriginsManager } from './components/CategoriesOriginsManager';
 import { ChartsSection } from './components/ChartsSection';
 import { Header } from './components/Header';
 import { KpiSummaryGrid } from './components/KpiSummaryGrid';
 import {
+  ClearDataModal,
   DeleteConfirmModal,
   TransactionDetailModal,
   TransactionFormModal,
@@ -15,6 +23,7 @@ import { QuickEntryForms } from './components/QuickEntryForms';
 import { TransactionsSection } from './components/TransactionsSection';
 import { auth, signInWithGoogle, signOutUser } from './firebase';
 import {
+  clearAllUserData,
   createCategoryRecord,
   createOriginRecord,
   createTransactionRecord,
@@ -64,6 +73,7 @@ export default function App() {
   const [filters, setFilters] = useState<TransactionFilters>(() =>
     createDefaultFilters()
   );
+  const deferredSearch = useDeferredValue(filters.search);
 
   // Modals
   const [viewingTx, setViewingTx] = useState<Transaction | null>(null);
@@ -71,6 +81,8 @@ export default function App() {
   const [creatingModalOpen, setCreatingModalOpen] = useState(false);
   const [deletingTx, setDeletingTx] = useState<Transaction | null>(null);
   const [deletingBusy, setDeletingBusy] = useState(false);
+  const [clearModalOpen, setClearModalOpen] = useState(false);
+  const [clearingBusy, setClearingBusy] = useState(false);
 
   const [toast, setToast] = useState<ToastState | null>(null);
   const lastSubmissionRef = useRef<{ signature: string; time: number } | null>(
@@ -176,12 +188,17 @@ export default function App() {
     [transactions, origins]
   );
 
-  const filteredTransactions = useMemo(
-    () => filterTransactions(transactions, filters),
-    [transactions, filters]
+  const effectiveFilters = useMemo(
+    () => ({ ...filters, search: deferredSearch }),
+    [filters, deferredSearch]
   );
 
-  const handleSignIn = async () => {
+  const filteredTransactions = useMemo(
+    () => filterTransactions(transactions, effectiveFilters),
+    [transactions, effectiveFilters]
+  );
+
+  const handleSignIn = useCallback(async () => {
     setAuthLoading(true);
     try {
       await signInWithGoogle();
@@ -193,9 +210,9 @@ export default function App() {
     } finally {
       setAuthLoading(false);
     }
-  };
+  }, [showToast]);
 
-  const handleSignOut = async () => {
+  const handleSignOut = useCallback(async () => {
     try {
       await signOutUser();
       showToast('success', 'Sessão encerrada.');
@@ -205,73 +222,80 @@ export default function App() {
         err instanceof Error ? err.message : 'Erro ao sair da conta.'
       );
     }
-  };
+  }, [showToast]);
 
-  const handleCreateTransaction = async (
-    payload: NormalizedTransactionPayload
-  ) => {
-    const signature = `${payload.type}|${payload.description.toLowerCase()}|${payload.amount}|${payload.date}|${payload.origin}`;
-    const nowMs = Date.now();
-    if (
-      lastSubmissionRef.current &&
-      lastSubmissionRef.current.signature === signature &&
-      nowMs - lastSubmissionRef.current.time < 2500
-    ) {
-      showToast(
-        'error',
-        'Movimentação duplicada detectada. Aguarde um instante.'
-      );
-      return;
-    }
-    lastSubmissionRef.current = { signature, time: nowMs };
+  const handleCreateTransaction = useCallback(
+    async (payload: NormalizedTransactionPayload) => {
+      const signature = `${payload.type}|${payload.description.toLowerCase()}|${payload.amount}|${payload.date}|${payload.origin}`;
+      const nowMs = Date.now();
+      if (
+        lastSubmissionRef.current &&
+        lastSubmissionRef.current.signature === signature &&
+        nowMs - lastSubmissionRef.current.time < 2500
+      ) {
+        showToast(
+          'error',
+          'Movimentação duplicada detectada. Aguarde um instante.'
+        );
+        return;
+      }
+      lastSubmissionRef.current = { signature, time: nowMs };
 
-    const created = await createTransactionRecord(user, payload);
-    if (!user) {
-      setTransactions((prev) => [created, ...prev]);
-    }
-    showToast(
-      'success',
-      payload.type === 'receita'
-        ? 'Receita salva com sucesso.'
-        : 'Despesa salva com sucesso.'
-    );
-  };
-
-  const handleSaveModalTransaction = async (
-    payload: NormalizedTransactionPayload,
-    existing: Transaction | null
-  ) => {
-    if (existing) {
-      const updated = await updateTransactionRecord(user, existing, payload);
+      const created = await createTransactionRecord(user, payload);
       if (!user) {
-        setTransactions((prev) =>
-          prev.map((item) => (item.id === existing.id ? updated : item))
+        setTransactions((prev) => [created, ...prev]);
+      }
+      showToast(
+        'success',
+        payload.type === 'receita'
+          ? 'Receita salva com sucesso.'
+          : 'Despesa salva com sucesso.'
+      );
+    },
+    [user, showToast]
+  );
+
+  const handleSaveModalTransaction = useCallback(
+    async (
+      payload: NormalizedTransactionPayload,
+      existing: Transaction | null
+    ) => {
+      if (existing) {
+        const updated = await updateTransactionRecord(user, existing, payload);
+        if (!user) {
+          setTransactions((prev) =>
+            prev.map((item) => (item.id === existing.id ? updated : item))
+          );
+        }
+        showToast('success', 'Movimentação atualizada.');
+      } else {
+        await handleCreateTransaction(payload);
+      }
+    },
+    [user, showToast, handleCreateTransaction]
+  );
+
+  const handleMarkAsPaid = useCallback(
+    async (tx: Transaction) => {
+      try {
+        const updated = await updateTransactionStatusRecord(user, tx, 'Paga');
+        if (!user) {
+          setTransactions((prev) =>
+            prev.map((item) => (item.id === tx.id ? updated : item))
+          );
+        }
+        showToast('success', `'${tx.description}' marcada como paga.`);
+      } catch (err) {
+        showToast(
+          'error',
+          err instanceof Error ? err.message : 'Erro ao atualizar status.'
         );
       }
-      showToast('success', 'Movimentação atualizada.');
-    } else {
-      await handleCreateTransaction(payload);
-    }
-  };
+    },
+    [user, showToast]
+  );
 
-  const handleMarkAsPaid = async (tx: Transaction) => {
-    try {
-      const updated = await updateTransactionStatusRecord(user, tx, 'Paga');
-      if (!user) {
-        setTransactions((prev) =>
-          prev.map((item) => (item.id === tx.id ? updated : item))
-        );
-      }
-      showToast('success', `'${tx.description}' marcada como paga.`);
-    } catch (err) {
-      showToast(
-        'error',
-        err instanceof Error ? err.message : 'Erro ao atualizar status.'
-      );
-    }
-  };
-
-  const handleConfirmDelete = async () => {
+  const handleConfirmDelete = useCallback(async () => {
     if (!deletingTx || deletingBusy) return;
     setDeletingBusy(true);
     try {
@@ -291,57 +315,104 @@ export default function App() {
     } finally {
       setDeletingBusy(false);
     }
-  };
+  }, [deletingTx, deletingBusy, user, showToast]);
 
-  const handleAddOrigin = async (name: string) => {
-    const created = await createOriginRecord(user, name);
-    if (!user) {
-      setOrigins((prev) => [...prev, created]);
-    }
-    showToast('success', `Banco '${name}' adicionado.`);
-  };
-
-  const handleDeleteOrigin = async (id: string) => {
-    try {
-      await deleteOriginRecord(user, id);
-      if (!user) {
-        setOrigins((prev) => prev.filter((o) => o.id !== id));
+  const handleConfirmClearAll = useCallback(
+    async (resetCustomDefinitions: boolean) => {
+      if (clearingBusy) return;
+      setClearingBusy(true);
+      try {
+        const nextLocal = await clearAllUserData(user, resetCustomDefinitions);
+        if (!user) {
+          setTransactions(nextLocal.transactions);
+          setOrigins(nextLocal.origins);
+          setCategories(nextLocal.categories);
+        }
+        setFilters(createDefaultFilters());
+        setClearModalOpen(false);
+        showToast('success', 'Todos os dados foram limpos com sucesso.');
+      } catch (err) {
+        showToast(
+          'error',
+          err instanceof Error ? err.message : 'Erro ao limpar dados.'
+        );
+        throw err;
+      } finally {
+        setClearingBusy(false);
       }
-      showToast('success', 'Origem removida.');
-    } catch (err) {
-      showToast(
-        'error',
-        err instanceof Error ? err.message : 'Erro ao remover origem.'
-      );
-    }
-  };
+    },
+    [clearingBusy, user, showToast]
+  );
 
-  const handleAddCategory = async (input: {
-    name: string;
-    type: CategoryScope;
-    color: string;
-  }) => {
-    const created = await createCategoryRecord(user, input);
-    if (!user) {
-      setCategories((prev) => [...prev, created]);
-    }
-    showToast('success', `Categoria '${input.name}' criada.`);
-  };
-
-  const handleDeleteCategory = async (id: string) => {
-    try {
-      await deleteCategoryRecord(user, id);
+  const handleAddOrigin = useCallback(
+    async (name: string) => {
+      const created = await createOriginRecord(user, name);
       if (!user) {
-        setCategories((prev) => prev.filter((c) => c.id !== id));
+        setOrigins((prev) => [...prev, created]);
       }
-      showToast('success', 'Categoria removida.');
-    } catch (err) {
-      showToast(
-        'error',
-        err instanceof Error ? err.message : 'Erro ao remover categoria.'
-      );
-    }
-  };
+      showToast('success', `Banco '${name}' adicionado.`);
+    },
+    [user, showToast]
+  );
+
+  const handleDeleteOrigin = useCallback(
+    async (id: string) => {
+      try {
+        await deleteOriginRecord(user, id);
+        if (!user) {
+          setOrigins((prev) => prev.filter((o) => o.id !== id));
+        }
+        showToast('success', 'Origem removida.');
+      } catch (err) {
+        showToast(
+          'error',
+          err instanceof Error ? err.message : 'Erro ao remover origem.'
+        );
+      }
+    },
+    [user, showToast]
+  );
+
+  const handleAddCategory = useCallback(
+    async (input: { name: string; type: CategoryScope; color: string }) => {
+      const created = await createCategoryRecord(user, input);
+      if (!user) {
+        setCategories((prev) => [...prev, created]);
+      }
+      showToast('success', `Categoria '${input.name}' criada.`);
+    },
+    [user, showToast]
+  );
+
+  const handleDeleteCategory = useCallback(
+    async (id: string) => {
+      try {
+        await deleteCategoryRecord(user, id);
+        if (!user) {
+          setCategories((prev) => prev.filter((c) => c.id !== id));
+        }
+        showToast('success', 'Categoria removida.');
+      } catch (err) {
+        showToast(
+          'error',
+          err instanceof Error ? err.message : 'Erro ao remover categoria.'
+        );
+      }
+    },
+    [user, showToast]
+  );
+
+  const handleSelectOriginFilter = useCallback((originName: string) => {
+    setFilters((prev) => ({ ...prev, origin: originName }));
+  }, []);
+
+  const handleResetFilters = useCallback(() => {
+    setFilters(createDefaultFilters());
+  }, []);
+
+  const handleOpenNewModal = useCallback(() => {
+    setCreatingModalOpen(true);
+  }, []);
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 selection:bg-emerald-200 flex flex-col">
@@ -355,8 +426,8 @@ export default function App() {
       />
 
       <main className="max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-1">
-        {/* Storage / Cloud Sync Banner */}
-        <div className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-white border border-slate-200 rounded-xl px-4 py-3 text-xs text-slate-600 shadow-sm">
+        {/* Storage / Cloud Sync Banner + Limpar Dados */}
+        <div className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white border border-slate-200 rounded-xl px-4 py-3 text-xs text-slate-600 shadow-sm">
           <div className="flex items-center gap-2">
             {user ? (
               <>
@@ -390,9 +461,20 @@ export default function App() {
               </>
             )}
           </div>
-          <span className="text-slate-500 tabular-nums shrink-0">
-            {transactions.length} movimentações salvas
-          </span>
+
+          <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0">
+            <span className="text-slate-500 tabular-nums">
+              {transactions.length} movimentações salvas
+            </span>
+            <button
+              type="button"
+              onClick={() => setClearModalOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+              Limpar Dados
+            </button>
+          </div>
         </div>
 
         {dbError && (
@@ -404,7 +486,7 @@ export default function App() {
             <button
               type="button"
               onClick={() => window.location.reload()}
-              className="px-3 py-1 bg-red-600 text-white rounded-md text-xs font-medium hover:bg-red-700 shrink-0"
+              className="px-3 py-1 bg-red-600 text-white rounded-md text-xs font-medium hover:bg-red-700 shrink-0 cursor-pointer"
             >
               Tentar novamente
             </button>
@@ -435,6 +517,8 @@ export default function App() {
                 <OriginsSection
                   origins={origins}
                   originBalances={summary.originBalances}
+                  selectedOrigin={filters.origin}
+                  onSelectOrigin={handleSelectOriginFilter}
                   onAddOrigin={handleAddOrigin}
                 />
 
@@ -452,7 +536,7 @@ export default function App() {
                     categories={categories}
                     origins={origins}
                     onFiltersChange={setFilters}
-                    onResetFilters={() => setFilters(createDefaultFilters())}
+                    onResetFilters={handleResetFilters}
                     onViewTransaction={setViewingTx}
                     onEditTransaction={setEditingTx}
                     onDeleteRequest={setDeletingTx}
@@ -479,12 +563,12 @@ export default function App() {
                   categories={categories}
                   origins={origins}
                   onFiltersChange={setFilters}
-                  onResetFilters={() => setFilters(createDefaultFilters())}
+                  onResetFilters={handleResetFilters}
                   onViewTransaction={setViewingTx}
                   onEditTransaction={setEditingTx}
                   onDeleteRequest={setDeletingTx}
                   onMarkAsPaid={handleMarkAsPaid}
-                  onOpenNewModal={() => setCreatingModalOpen(true)}
+                  onOpenNewModal={handleOpenNewModal}
                 />
               </div>
             )}
@@ -543,6 +627,15 @@ export default function App() {
           deleting={deletingBusy}
           onCancel={() => setDeletingTx(null)}
           onConfirm={handleConfirmDelete}
+        />
+      )}
+
+      {clearModalOpen && (
+        <ClearDataModal
+          transactionCount={transactions.length}
+          clearing={clearingBusy}
+          onCancel={() => setClearModalOpen(false)}
+          onConfirm={handleConfirmClearAll}
         />
       )}
 

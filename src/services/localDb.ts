@@ -50,10 +50,16 @@ function runStoreRequest<T>(
         const tx = db.transaction(storeName, mode);
         const store = tx.objectStore(storeName);
         const req = executor(store);
-        req.onsuccess = () => resolve(req.result);
+        let result!: T;
+        req.onsuccess = () => {
+          result = req.result;
+        };
         req.onerror = () =>
           reject(req.error ?? new Error(`Erro na operação em ${storeName}.`));
-        tx.oncomplete = () => db.close();
+        tx.oncomplete = () => {
+          db.close();
+          resolve(result);
+        };
         tx.onerror = () => {
           db.close();
           reject(tx.error ?? new Error(`Falha na transação em ${storeName}.`));
@@ -71,48 +77,112 @@ export function generateSafeId(prefix: string): string {
 }
 
 export async function ensureLocalDefaults(): Promise<void> {
-  const seeded = await runStoreRequest<{ key: string; value: boolean } | undefined>(
-    STORE_META,
-    'readonly',
-    (store) => store.get('seeded')
-  );
-  if (seeded?.value) return;
+  const db = await openDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(
+        [STORE_META, STORE_ORIGINS, STORE_CATEGORIES],
+        'readwrite'
+      );
+      const metaStore = tx.objectStore(STORE_META);
+      const originStore = tx.objectStore(STORE_ORIGINS);
+      const catStore = tx.objectStore(STORE_CATEGORIES);
 
-  const existingOrigins = await getAllLocalOrigins();
-  const existingCategories = await getAllLocalCategories();
-  const baseTime = Date.now();
+      const seededReq = metaStore.get('seeded');
+      const oriCountReq = originStore.count();
+      const catCountReq = catStore.count();
 
-  if (existingOrigins.length === 0) {
-    for (let i = 0; i < DEFAULT_ORIGINS.length; i += 1) {
-      const def = DEFAULT_ORIGINS[i];
-      await putLocalOrigin({
-        id: generateSafeId('ori'),
-        userId: 'local',
-        name: def.name,
-        isDefault: def.isDefault,
-        createdAt: new Date(baseTime + i * 10).toISOString(),
-      });
-    }
+      let seededVal = false;
+      let oriCount = 0;
+      let catCount = 0;
+      let checksDone = 0;
+
+      const maybeSeed = () => {
+        checksDone += 1;
+        if (checksDone < 3) return;
+
+        if (!seededVal) {
+          const baseTime = Date.now();
+          if (oriCount === 0) {
+            DEFAULT_ORIGINS.forEach((def, idx) => {
+              originStore.put({
+                id: generateSafeId('ori'),
+                userId: 'local',
+                name: def.name,
+                isDefault: def.isDefault,
+                createdAt: new Date(baseTime + idx * 10).toISOString(),
+              } satisfies Origin);
+            });
+          }
+          if (catCount === 0) {
+            DEFAULT_CATEGORIES.forEach((def, idx) => {
+              catStore.put({
+                id: generateSafeId('cat'),
+                userId: 'local',
+                name: def.name,
+                type: def.type,
+                color: def.color,
+                isDefault: def.isDefault,
+                createdAt: new Date(baseTime + idx * 10).toISOString(),
+              } satisfies Category);
+            });
+          }
+          metaStore.put({ key: 'seeded', value: true });
+        }
+      };
+
+      seededReq.onsuccess = () => {
+        seededVal = Boolean(seededReq.result?.value);
+        maybeSeed();
+      };
+      oriCountReq.onsuccess = () => {
+        oriCount = oriCountReq.result;
+        maybeSeed();
+      };
+      catCountReq.onsuccess = () => {
+        catCount = catCountReq.result;
+        maybeSeed();
+      };
+
+      tx.oncomplete = () => resolve();
+      tx.onerror = () =>
+        reject(tx.error ?? new Error('Erro ao inicializar dados locais.'));
+    });
+  } finally {
+    db.close();
   }
+}
 
-  if (existingCategories.length === 0) {
-    for (let i = 0; i < DEFAULT_CATEGORIES.length; i += 1) {
-      const def = DEFAULT_CATEGORIES[i];
-      await putLocalCategory({
-        id: generateSafeId('cat'),
-        userId: 'local',
-        name: def.name,
-        type: def.type,
-        color: def.color,
-        isDefault: def.isDefault,
-        createdAt: new Date(baseTime + i * 10).toISOString(),
-      });
-    }
+export async function loadAllLocalStores(): Promise<{
+  transactions: Transaction[];
+  origins: Origin[];
+  categories: Category[];
+}> {
+  await ensureLocalDefaults();
+  const db = await openDatabase();
+  try {
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(
+        [STORE_TRANSACTIONS, STORE_ORIGINS, STORE_CATEGORIES],
+        'readonly'
+      );
+      const txReq = tx.objectStore(STORE_TRANSACTIONS).getAll();
+      const oriReq = tx.objectStore(STORE_ORIGINS).getAll();
+      const catReq = tx.objectStore(STORE_CATEGORIES).getAll();
+
+      tx.oncomplete = () => {
+        resolve({
+          transactions: (txReq.result as Transaction[]) || [],
+          origins: (oriReq.result as Origin[]) || [],
+          categories: (catReq.result as Category[]) || [],
+        });
+      };
+      tx.onerror = () =>
+        reject(tx.error ?? new Error('Erro ao ler banco de dados local.'));
+    });
+  } finally {
+    db.close();
   }
-
-  await runStoreRequest(STORE_META, 'readwrite', (store) =>
-    store.put({ key: 'seeded', value: true })
-  );
 }
 
 export function getAllLocalTransactions(): Promise<Transaction[]> {
@@ -161,4 +231,57 @@ export async function deleteLocalCategory(id: string): Promise<void> {
 
 export async function clearLocalTransactions(): Promise<void> {
   await runStoreRequest(STORE_TRANSACTIONS, 'readwrite', (store) => store.clear());
+}
+
+export async function clearAllLocalData(
+  resetCustomDefinitions: boolean
+): Promise<void> {
+  const db = await openDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const storeNames = resetCustomDefinitions
+        ? [STORE_TRANSACTIONS, STORE_ORIGINS, STORE_CATEGORIES, STORE_META]
+        : [STORE_TRANSACTIONS];
+      const tx = db.transaction(storeNames, 'readwrite');
+      tx.objectStore(STORE_TRANSACTIONS).clear();
+
+      if (resetCustomDefinitions) {
+        const originStore = tx.objectStore(STORE_ORIGINS);
+        const catStore = tx.objectStore(STORE_CATEGORIES);
+        const metaStore = tx.objectStore(STORE_META);
+
+        originStore.clear();
+        catStore.clear();
+
+        const baseTime = Date.now();
+        DEFAULT_ORIGINS.forEach((def, idx) => {
+          originStore.put({
+            id: generateSafeId('ori'),
+            userId: 'local',
+            name: def.name,
+            isDefault: def.isDefault,
+            createdAt: new Date(baseTime + idx * 10).toISOString(),
+          } satisfies Origin);
+        });
+        DEFAULT_CATEGORIES.forEach((def, idx) => {
+          catStore.put({
+            id: generateSafeId('cat'),
+            userId: 'local',
+            name: def.name,
+            type: def.type,
+            color: def.color,
+            isDefault: def.isDefault,
+            createdAt: new Date(baseTime + idx * 10).toISOString(),
+          } satisfies Category);
+        });
+        metaStore.put({ key: 'seeded', value: true });
+      }
+
+      tx.oncomplete = () => resolve();
+      tx.onerror = () =>
+        reject(tx.error ?? new Error('Erro ao limpar banco de dados local.'));
+    });
+  } finally {
+    db.close();
+  }
 }

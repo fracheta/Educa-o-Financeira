@@ -5,6 +5,7 @@ import {
   PieChart as PieChartIcon,
   TrendingUp,
 } from 'lucide-react';
+import { memo, useMemo } from 'react';
 import {
   Area,
   AreaChart,
@@ -70,18 +71,27 @@ function CurrencyTooltip({
   );
 }
 
-export function ChartsSection({
+export const ChartsSection = memo(function ChartsSection({
   transactions,
   categories,
   summary,
 }: ChartsSectionProps) {
-  const incomeVsExpense = buildIncomeVsExpenseData(transactions);
-  const expensesByCategory = buildExpensesByCategoryData(
-    transactions,
-    categories
+  const incomeVsExpense = useMemo(
+    () => buildIncomeVsExpenseData(transactions),
+    [transactions]
   );
-  const monthlyEvolution = buildMonthlyEvolutionData(transactions);
-  const timelineMovements = buildTimelineMovementsData(transactions);
+  const expensesByCategory = useMemo(
+    () => buildExpensesByCategoryData(transactions, categories),
+    [transactions, categories]
+  );
+  const monthlyEvolution = useMemo(
+    () => buildMonthlyEvolutionData(transactions),
+    [transactions]
+  );
+  const timelineMovements = useMemo(
+    () => buildTimelineMovementsData(transactions),
+    [transactions]
+  );
 
   const hasTransactions = transactions.length > 0;
 
@@ -448,4 +458,4 @@ export function ChartsSection({
       </div>
     </section>
   );
-}
+});

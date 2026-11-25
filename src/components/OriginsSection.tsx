@@ -1,17 +1,21 @@
 import { Building2, Plus, X } from 'lucide-react';
-import { FormEvent, useState } from 'react';
+import { FormEvent, memo, useState } from 'react';
 import { Origin } from '../types/finance';
 import { formatBRL, validateOriginName } from '../utils/finance';
 
 interface OriginsSectionProps {
   origins: Origin[];
   originBalances: Record<string, number>;
+  selectedOrigin?: string;
+  onSelectOrigin?: (originName: string) => void;
   onAddOrigin: (name: string) => Promise<void>;
 }
 
-export function OriginsSection({
+export const OriginsSection = memo(function OriginsSection({
   origins,
   originBalances,
+  selectedOrigin = 'all',
+  onSelectOrigin,
   onAddOrigin,
 }: OriginsSectionProps) {
   const [adding, setAdding] = useState(false);
@@ -45,10 +49,21 @@ export function OriginsSection({
   return (
     <section aria-label="Saldos por Origem" className="mb-8">
       <div className="flex items-center justify-between mb-4 gap-4">
-        <h2 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
-          <Building2 className="w-5 h-5 text-slate-500" aria-hidden="true" />
-          Saldos por Origem
-        </h2>
+        <div className="flex items-center gap-3 flex-wrap">
+          <h2 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
+            <Building2 className="w-5 h-5 text-slate-500" aria-hidden="true" />
+            Saldos por Origem
+          </h2>
+          {selectedOrigin !== 'all' && onSelectOrigin && (
+            <button
+              type="button"
+              onClick={() => onSelectOrigin('all')}
+              className="text-xs text-slate-600 hover:text-slate-900 underline cursor-pointer"
+            >
+              Filtrando: {selectedOrigin} (Limpar)
+            </button>
+          )}
+        </div>
         <button
           type="button"
           onClick={() => {
@@ -65,10 +80,25 @@ export function OriginsSection({
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3">
         {origins.map((origin) => {
           const balance = originBalances[origin.name] ?? 0;
+          const isSelected = selectedOrigin === origin.name;
           return (
-            <div
+            <button
               key={origin.id}
-              className="bg-white border border-slate-200 rounded-lg p-4 shadow-sm"
+              type="button"
+              onClick={() =>
+                onSelectOrigin?.(isSelected ? 'all' : origin.name)
+              }
+              title={
+                onSelectOrigin
+                  ? `Filtrar movimentações de ${origin.name}`
+                  : origin.name
+              }
+              aria-pressed={onSelectOrigin ? isSelected : undefined}
+              className={`text-left bg-white rounded-lg p-4 shadow-sm transition-colors border ${
+                isSelected
+                  ? 'border-slate-900 ring-1 ring-slate-900'
+                  : 'border-slate-200 hover:border-slate-300'
+              } ${onSelectOrigin ? 'cursor-pointer' : 'cursor-default'}`}
             >
               <h4
                 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 truncate"
@@ -83,7 +113,7 @@ export function OriginsSection({
               >
                 {formatBRL(balance)}
               </div>
-            </div>
+            </button>
           );
         })}
 
@@ -136,4 +166,4 @@ export function OriginsSection({
       </div>
     </section>
   );
-}
+});

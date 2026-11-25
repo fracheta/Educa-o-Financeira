@@ -196,3 +196,38 @@ test('chart builders produce accurate aggregations', () => {
   const timeline = buildTimelineMovementsData(sampleTransactions);
   assert.equal(timeline.length, 4);
 });
+
+import {
+  sortCategories,
+  sortOrigins,
+  verifyClearDataPassword,
+} from './finance';
+
+test('verifyClearDataPassword accepts only 1234', () => {
+  assert.equal(verifyClearDataPassword('1234'), true);
+  assert.equal(verifyClearDataPassword(' 1234 '), true);
+  assert.equal(verifyClearDataPassword('0000'), false);
+  assert.equal(verifyClearDataPassword(''), false);
+});
+
+test('sortOrigins keeps default origins in canonical order', () => {
+  const unsorted: Origin[] = [
+    { id: '1', userId: 'u1', name: 'Inter', isDefault: false, createdAt: '2026-11-02T00:00:00Z' },
+    { id: '2', userId: 'u1', name: 'Nubank', isDefault: true, createdAt: '2026-11-01T00:00:00Z' },
+    { id: '3', userId: 'u1', name: 'Itaú', isDefault: true, createdAt: '2026-11-01T00:00:00Z' },
+    { id: '4', userId: 'u1', name: 'Caixa', isDefault: true, createdAt: '2026-11-01T00:00:00Z' },
+  ];
+  const sorted = sortOrigins(unsorted).map((o) => o.name);
+  assert.deepEqual(sorted, ['Itaú', 'Caixa', 'Nubank', 'Inter']);
+});
+
+test('sortCategories keeps default categories in canonical order', () => {
+  const unsorted: Category[] = [
+    { id: '1', userId: 'u1', name: 'Outros', type: 'ambos', color: '#64748b', isDefault: true, createdAt: '2026-11-01T00:00:00Z' },
+    { id: '2', userId: 'u1', name: 'Moradia', type: 'despesa', color: '#0f172a', isDefault: true, createdAt: '2026-11-01T00:00:00Z' },
+    { id: '3', userId: 'u1', name: 'Zebra', type: 'despesa', color: '#000000', isDefault: false, createdAt: '2026-11-02T00:00:00Z' },
+  ];
+  const sorted = sortCategories(unsorted).map((c) => c.name);
+  assert.deepEqual(sorted, ['Moradia', 'Outros', 'Zebra']);
+});
+

@@ -3,6 +3,7 @@ import {
   collection,
   deleteDoc,
   doc,
+  DocumentReference,
   getDoc,
   getDocs,
   onSnapshot,
@@ -12,6 +13,7 @@ import {
   setDoc,
   Timestamp,
   updateDoc,
+  writeBatch,
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import {
@@ -25,17 +27,18 @@ import {
   DEFAULT_CATEGORIES,
   DEFAULT_ORIGINS,
   NormalizedTransactionPayload,
+  sortCategories,
+  sortOrigins,
 } from '../utils/finance';
 import {
+  clearAllLocalData,
   clearLocalTransactions,
   deleteLocalCategory,
   deleteLocalOrigin,
   deleteLocalTransaction,
-  ensureLocalDefaults,
   generateSafeId,
-  getAllLocalCategories,
-  getAllLocalOrigins,
   getAllLocalTransactions,
+  loadAllLocalStores,
   putLocalCategory,
   putLocalOrigin,
   putLocalTransaction,
@@ -47,6 +50,22 @@ function toIsoString(val: unknown): string {
   }
   if (typeof val === 'string') return val;
   return new Date().toISOString();
+}
+
+async function commitDeletesInChunks(refs: DocumentReference[], path: string) {
+  const CHUNK_SIZE = 450;
+  for (let i = 0; i < refs.length; i += CHUNK_SIZE) {
+    const chunk = refs.slice(i, i + CHUNK_SIZE);
+    const batch = writeBatch(db);
+    for (const ref of chunk) {
+      batch.delete(ref);
+    }
+    try {
+      await batch.commit();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, path);
+    }
+  }
 }
 
 export async function ensureUserProfileAndDefaults(user: User): Promise<void> {
@@ -74,41 +93,51 @@ export async function ensureUserProfileAndDefaults(user: User): Promise<void> {
   }
 
   const originsPath = `users/${user.uid}/origins`;
-  try {
-    const originsSnap = await getDocs(collection(db, 'users', user.uid, 'origins'));
-    if (originsSnap.empty) {
-      for (const def of DEFAULT_ORIGINS) {
-        const originId = generateSafeId('ori');
-        await setDoc(doc(db, 'users', user.uid, 'origins', originId), {
-          userId: user.uid,
-          name: def.name,
-          isDefault: def.isDefault,
-          createdAt: serverTimestamp(),
-        });
-      }
-    }
-  } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, originsPath);
-  }
-
   const categoriesPath = `users/${user.uid}/categories`;
+
   try {
-    const catsSnap = await getDocs(collection(db, 'users', user.uid, 'categories'));
-    if (catsSnap.empty) {
-      for (const def of DEFAULT_CATEGORIES) {
-        const catId = generateSafeId('cat');
-        await setDoc(doc(db, 'users', user.uid, 'categories', catId), {
-          userId: user.uid,
-          name: def.name,
-          type: def.type,
-          color: def.color,
-          isDefault: def.isDefault,
-          createdAt: serverTimestamp(),
-        });
+    const [originsSnap, catsSnap] = await Promise.all([
+      getDocs(collection(db, 'users', user.uid, 'origins')),
+      getDocs(collection(db, 'users', user.uid, 'categories')),
+    ]);
+
+    if (originsSnap.empty || catsSnap.empty) {
+      const batch = writeBatch(db);
+
+      if (originsSnap.empty) {
+        for (const def of DEFAULT_ORIGINS) {
+          const originId = generateSafeId('ori');
+          batch.set(doc(db, 'users', user.uid, 'origins', originId), {
+            userId: user.uid,
+            name: def.name,
+            isDefault: def.isDefault,
+            createdAt: serverTimestamp(),
+          });
+        }
       }
+
+      if (catsSnap.empty) {
+        for (const def of DEFAULT_CATEGORIES) {
+          const catId = generateSafeId('cat');
+          batch.set(doc(db, 'users', user.uid, 'categories', catId), {
+            userId: user.uid,
+            name: def.name,
+            type: def.type,
+            color: def.color,
+            isDefault: def.isDefault,
+            createdAt: serverTimestamp(),
+          });
+        }
+      }
+
+      await batch.commit();
     }
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, categoriesPath);
+    handleFirestoreError(
+      error,
+      OperationType.WRITE,
+      `${originsPath} / ${categoriesPath}`
+    );
   }
 }
 
@@ -174,7 +203,7 @@ export function subscribeFirestoreData(
           createdAt: toIsoString(data.createdAt),
         };
       });
-      callbacks.onOrigins(items);
+      callbacks.onOrigins(sortOrigins(items));
     },
     (error) => {
       try {
@@ -203,7 +232,7 @@ export function subscribeFirestoreData(
           createdAt: toIsoString(data.createdAt),
         };
       });
-      callbacks.onCategories(items);
+      callbacks.onCategories(sortCategories(items));
     },
     (error) => {
       try {
@@ -226,15 +255,12 @@ export async function loadLocalData(): Promise<{
   origins: Origin[];
   categories: Category[];
 }> {
-  await ensureLocalDefaults();
-  const [transactions, origins, categories] = await Promise.all([
-    getAllLocalTransactions(),
-    getAllLocalOrigins(),
-    getAllLocalCategories(),
-  ]);
-  origins.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  categories.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  return { transactions, origins, categories };
+  const { transactions, origins, categories } = await loadAllLocalStores();
+  return {
+    transactions,
+    origins: sortOrigins(origins),
+    categories: sortCategories(categories),
+  };
 }
 
 export async function createTransactionRecord(
@@ -481,11 +507,14 @@ export async function migrateLocalTransactionsToFirestore(
   const localTxs = await getAllLocalTransactions();
   if (localTxs.length === 0) return 0;
 
-  let migrated = 0;
-  for (const tx of localTxs) {
-    const docPath = `users/${user.uid}/transactions/${tx.id}`;
-    try {
-      await setDoc(doc(db, 'users', user.uid, 'transactions', tx.id), {
+  const CHUNK_SIZE = 450;
+  const colPath = `users/${user.uid}/transactions`;
+
+  for (let i = 0; i < localTxs.length; i += CHUNK_SIZE) {
+    const chunk = localTxs.slice(i, i + CHUNK_SIZE);
+    const batch = writeBatch(db);
+    for (const tx of chunk) {
+      batch.set(doc(db, 'users', user.uid, 'transactions', tx.id), {
         userId: user.uid,
         type: tx.type,
         description: tx.description,
@@ -498,11 +527,65 @@ export async function migrateLocalTransactionsToFirestore(
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-      migrated += 1;
+    }
+    try {
+      await batch.commit();
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, docPath);
+      handleFirestoreError(error, OperationType.CREATE, colPath);
     }
   }
+
   await clearLocalTransactions();
-  return migrated;
+  return localTxs.length;
+}
+
+export async function clearAllUserData(
+  user: User | null,
+  resetCustomDefinitions: boolean
+): Promise<{
+  transactions: Transaction[];
+  origins: Origin[];
+  categories: Category[];
+}> {
+  if (user) {
+    const txPath = `users/${user.uid}/transactions`;
+    let txDocs;
+    try {
+      txDocs = await getDocs(collection(db, 'users', user.uid, 'transactions'));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, txPath);
+    }
+    await commitDeletesInChunks(
+      txDocs.docs.map((d) => d.ref),
+      txPath
+    );
+
+    if (resetCustomDefinitions) {
+      const originsPath = `users/${user.uid}/origins`;
+      const catsPath = `users/${user.uid}/categories`;
+      try {
+        const [oriSnap, catSnap] = await Promise.all([
+          getDocs(collection(db, 'users', user.uid, 'origins')),
+          getDocs(collection(db, 'users', user.uid, 'categories')),
+        ]);
+        const customOriRefs = oriSnap.docs
+          .filter((d) => !d.data().isDefault)
+          .map((d) => d.ref);
+        const customCatRefs = catSnap.docs
+          .filter((d) => !d.data().isDefault)
+          .map((d) => d.ref);
+
+        await commitDeletesInChunks(customOriRefs, originsPath);
+        await commitDeletesInChunks(customCatRefs, catsPath);
+      } catch (error) {
+        handleFirestoreError(error, OperationType.DELETE, originsPath);
+      }
+    }
+
+    await clearAllLocalData(resetCustomDefinitions);
+    return { transactions: [], origins: [], categories: [] };
+  }
+
+  await clearAllLocalData(resetCustomDefinitions);
+  return loadLocalData();
 }

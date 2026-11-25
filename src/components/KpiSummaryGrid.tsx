@@ -8,6 +8,7 @@ import {
   TrendingUp,
   Wallet,
 } from 'lucide-react';
+import { memo } from 'react';
 import { FinancialSummary } from '../types/finance';
 import { formatBRL } from '../utils/finance';
 
@@ -15,7 +16,7 @@ interface KpiSummaryGridProps {
   summary: FinancialSummary;
 }
 
-export function KpiSummaryGrid({ summary }: KpiSummaryGridProps) {
+export const KpiSummaryGrid = memo(function KpiSummaryGrid({ summary }: KpiSummaryGridProps) {
   return (
     <section aria-label="Indicadores financeiros" className="mb-8 space-y-4">
       {/* Row 1: Reference 4 primary cards */}
@@ -193,4 +194,4 @@ export function KpiSummaryGrid({ summary }: KpiSummaryGridProps) {
       </div>
     </section>
   );
-}
+});

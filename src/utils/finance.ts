@@ -603,3 +603,38 @@ export function transactionsToCSV(transactions: Transaction[]): string {
 
   return [header.map(escape).join(';'), ...rows.map((r) => r.join(';'))].join('\n');
 }
+
+export const CLEAR_DATA_PASSWORD = '1234';
+
+export function verifyClearDataPassword(input: string): boolean {
+  return input.trim() === CLEAR_DATA_PASSWORD;
+}
+
+export function sortOrigins(origins: Origin[]): Origin[] {
+  const defaultOrder = new Map(
+    DEFAULT_ORIGINS.map((o, idx) => [o.name.toLowerCase(), idx])
+  );
+  return [...origins].sort((a, b) => {
+    const idxA = defaultOrder.get(a.name.toLowerCase());
+    const idxB = defaultOrder.get(b.name.toLowerCase());
+    if (idxA !== undefined && idxB !== undefined) return idxA - idxB;
+    if (idxA !== undefined) return -1;
+    if (idxB !== undefined) return 1;
+    return a.createdAt.localeCompare(b.createdAt);
+  });
+}
+
+export function sortCategories(categories: Category[]): Category[] {
+  const defaultOrder = new Map(
+    DEFAULT_CATEGORIES.map((c, idx) => [c.name.toLowerCase(), idx])
+  );
+  return [...categories].sort((a, b) => {
+    const idxA = defaultOrder.get(a.name.toLowerCase());
+    const idxB = defaultOrder.get(b.name.toLowerCase());
+    if (idxA !== undefined && idxB !== undefined) return idxA - idxB;
+    if (idxA !== undefined) return -1;
+    if (idxB !== undefined) return 1;
+    return a.createdAt.localeCompare(b.createdAt);
+  });
+}
+
